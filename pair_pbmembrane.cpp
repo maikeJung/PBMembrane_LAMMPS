@@ -28,21 +28,15 @@
 #include "neighbor.h"
 #include "neigh_list.h"
 #include "integrate.h"
-#include "citeme.h"
 #include "memory.h"
 #include "error.h"
 
 using namespace LAMMPS_NS;
 
-static const char cite_pair_pbmembrane[] =
-  "pair pbmembrane command:\n\n";
-
 /* ---------------------------------------------------------------------- */
 
 Pairpbmembrane::Pairpbmembrane(LAMMPS *lmp) : Pair(lmp)
 {
-  if (lmp->citeme) lmp->citeme->add(cite_pair_pbmembrane);
-
   single_enable = 0;
   writedata = 1;
 }
@@ -109,6 +103,30 @@ void Pairpbmembrane::compute(int eflag, int vflag)
     jlist = firstneigh[i];
     jnum = numneigh[i];
 
+	// preloop over j to calculate rho
+	double rhoim = 0.0;
+	double Am = 1.43, rcutm = 1.9;
+	double nm = 6.0;
+
+	for (jj = 0; jj < jnum; jj++) {
+      j = jlist[jj];
+      j &= NEIGHMASK;
+
+      r12[0] = x[j][0]-x[i][0];
+      r12[1] = x[j][1]-x[i][1];
+      r12[2] = x[j][2]-x[i][2];
+      rsq = MathExtra::dot3(r12,r12);
+      jtype = type[j];
+
+      if (rsq < cutsq[itype][jtype]) {
+		rhoim += exp( Am*(1.0 + 1.0/( pow(sqrt(rsq)/rcutm,nm) - 1.0 ) ) );
+      }
+		
+	}
+
+	// calculate factor for rhoi
+	double pref_rhoim = 1.0/( exp(4.0*(rhoim - 4.0) ) + 1.0 );	
+	
     for (jj = 0; jj < jnum; jj++) {
       j = jlist[jj];
       factor_lj = special_lj[sbmask(j)];
@@ -128,7 +146,7 @@ void Pairpbmembrane::compute(int eflag, int vflag)
 
         jquat = bonus[ellipsoid[j]].quat;
         MathExtra::quat_to_mat_trans(jquat,a2);  
-        one_eng = pbmembrane_analytic(i,j,a1,a2,r12,rsq,fforce,ttor,rtor);
+        one_eng = pbmembrane_analytic(i,j,a1,a2,r12,rsq,fforce,ttor,rtor,pref_rhoim);
 
         fforce[0] *= factor_lj;
         fforce[1] *= factor_lj;
@@ -419,7 +437,7 @@ void Pairpbmembrane::write_data_all(FILE *fp)
 double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][3],
                                        double a2[3][3], double *r12,
                                        const double rsq, double *fforce,
-                                       double *ttor, double *rtor)
+                                       double *ttor, double *rtor, double pref_rhoim)
 
 { 
     int *type = atom->type;
@@ -467,7 +485,15 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
     
     dphi_dnj1[0] = muu*(ni1[0]+r12hat[0]*(sint-ni1rhat));
     dphi_dnj1[1] = muu*(ni1[1]+r12hat[1]*(sint-ni1rhat));
-    dphi_dnj1[2] = muu*(ni1[2]+r12hat[2]*(sint-ni1rhat));    
+    dphi_dnj1[2] = muu*(ni1[2]+r12hat[2]*(sint-ni1rhat));  
+
+	/*my calc Urep + Uatt*/
+	double Urep = 0.0, dUrep_dri = 0.0, dUatt_dri;
+	double sigmam = 1.0;
+	double Am2 = 1.43, nm2 = 6.0, rcutm2 = 1.9; 
+	double fcutm = 0.0;
+
+  
 
     if (r < rmin)
     {
@@ -481,6 +507,13 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
         dUdr = 4.0*(t2-t4)/r*energy_well;
       
         dUdphi = -energy_well;
+
+		/*maike */
+		Urep = exp( -20.0*(r/sigmam -1) );
+		dUrep_dri = (-20.0/sigmam)*Urep; //add rij hat later
+
+		fcutm = exp( Am2*(1.0 + 1.0/( pow(r/rcutm2,nm2) - 1.0 ) ) );
+		dUatt_dri = (Am2*nm2*fcutm/rcutm2)*pow(r/rcutm2,nm2-1.0)/pow( pow(r/rcutm2,nm2) - 1, 2);
     }
     
     
@@ -508,17 +541,28 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
     dUdrhat[2] = dUdphi*dphi_drhat[2];
     
     double dUdrhatrhat = MathExtra::dot3(dUdrhat,r12hat);
+
+	/*added my potential*/
     
-    fforce[0] = dUdr*r12hat[0] + (dUdrhat[0]-dUdrhatrhat*r12hat[0])/r;
-    fforce[1] = dUdr*r12hat[1] + (dUdrhat[1]-dUdrhatrhat*r12hat[1])/r;
-    fforce[2] = dUdr*r12hat[2] + (dUdrhat[2]-dUdrhatrhat*r12hat[2])/r;
+    //fforce[0] = dUdr*r12hat[0] + (dUdrhat[0]-dUdrhatrhat*r12hat[0])/r;
+    //fforce[1] = dUdr*r12hat[1] + (dUdrhat[1]-dUdrhatrhat*r12hat[1])/r;
+    //fforce[2] = dUdr*r12hat[2] + (dUdrhat[2]-dUdrhatrhat*r12hat[2])/r;
     
+	fforce[0] = dUrep_dri*r12hat[0] + 5.0*pref_rhoim*dUatt_dri*r12hat[0];
+    fforce[1] = dUrep_dri*r12hat[1] + 5.0*pref_rhoim*dUatt_dri*r12hat[1];
+    fforce[2] = dUrep_dri*r12hat[2] + 5.0*pref_rhoim*dUatt_dri*r12hat[2];
+
     // torque i
     dUdni1[0] = dUdphi*dphi_dni1[0];
     dUdni1[1] = dUdphi*dphi_dni1[1];
     dUdni1[2] = dUdphi*dphi_dni1[2];
     
     MathExtra::cross3(dUdni1,ni1,ttor);  //minus sign is replace by swapping ni1 and dUdni1
+
+	// set ttor (torque 0)
+	ttor[0] = 0.0;
+	ttor[1] = 0.0;
+	ttor[2] = 0.0;
     
     if (newton_pair || j < nlocal) {
         
@@ -527,6 +571,7 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
         dUdnj1[2] = dUdphi*dphi_dnj1[2];
         
         MathExtra::cross3(dUdnj1,nj1,rtor);  //minus sign is replace by swapping ni1 and dUdni1
+		
     }
     
     

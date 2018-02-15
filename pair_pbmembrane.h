@@ -53,7 +53,7 @@ class Pairpbmembrane : public Pair {
   double pbmembrane_analytic(const int i, const int j, double a1[3][3],
                            double a2[3][3], double *r12,
                            const double rsq, double *fforce, double *ttor,
-                           double *rtor);
+                           double *rtor, double pref_rhoim);
 
 
 };
