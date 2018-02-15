@@ -105,7 +105,7 @@ void Pairpbmembrane::compute(int eflag, int vflag)
 
 	// preloop over j to calculate rho
 	double rhoim = 0.0;
-	double Am = 1.43, rcutm = 1.9;
+	double Am = 2.12, rcutm = 2.46;
 	double nm = 6.0;
 
 	for (jj = 0; jj < jnum; jj++) {
@@ -488,12 +488,19 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
     dphi_dnj1[2] = muu*(ni1[2]+r12hat[2]*(sint-ni1rhat));  
 
 	/*my calc Urep + Uatt*/
-	double Urep = 0.0, dUrep_dri = 0.0, dUatt_dri;
+	double Urep = 0.0, dUrep_dri = 0.0, dUatt_dri = 0.0;
 	double sigmam = 1.0;
-	double Am2 = 1.43, nm2 = 6.0, rcutm2 = 1.9; 
+	double Am2 = 2.12, nm2 = 6.0, rcutm2 = 2.46; 
 	double fcutm = 0.0;
 
-  
+  	/*maike */
+	if (r < 2.45){
+		Urep = exp( -20.0*(r/sigmam -1) );
+		dUrep_dri = (-20.0/sigmam)*Urep; //add rij hat later
+
+		fcutm = exp( Am2*(1.0 + 1.0/( pow(r/rcutm2,nm2) - 1.0 ) ) );
+		dUatt_dri = (Am2*nm2*fcutm/rcutm2)*pow(r/rcutm2,nm2-1.0)/pow( pow(r/rcutm2,nm2) - 1.0, 2.0);
+	}
 
     if (r < rmin)
     {
@@ -508,12 +515,7 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
       
         dUdphi = -energy_well;
 
-		/*maike */
-		Urep = exp( -20.0*(r/sigmam -1) );
-		dUrep_dri = (-20.0/sigmam)*Urep; //add rij hat later
 
-		fcutm = exp( Am2*(1.0 + 1.0/( pow(r/rcutm2,nm2) - 1.0 ) ) );
-		dUatt_dri = (Am2*nm2*fcutm/rcutm2)*pow(r/rcutm2,nm2-1.0)/pow( pow(r/rcutm2,nm2) - 1, 2);
     }
     
     
@@ -548,9 +550,9 @@ double Pairpbmembrane::pbmembrane_analytic(const int i,const int j,double a1[3][
     //fforce[1] = dUdr*r12hat[1] + (dUdrhat[1]-dUdrhatrhat*r12hat[1])/r;
     //fforce[2] = dUdr*r12hat[2] + (dUdrhat[2]-dUdrhatrhat*r12hat[2])/r;
     
-	fforce[0] = dUrep_dri*r12hat[0] + 5.0*pref_rhoim*dUatt_dri*r12hat[0];
-    fforce[1] = dUrep_dri*r12hat[1] + 5.0*pref_rhoim*dUatt_dri*r12hat[1];
-    fforce[2] = dUrep_dri*r12hat[2] + 5.0*pref_rhoim*dUatt_dri*r12hat[2];
+	fforce[0] = dUrep_dri*r12hat[0] + 2.0*pref_rhoim*dUatt_dri*r12hat[0];
+    fforce[1] = dUrep_dri*r12hat[1] + 2.0*pref_rhoim*dUatt_dri*r12hat[1];
+    fforce[2] = dUrep_dri*r12hat[2] + 2.0*pref_rhoim*dUatt_dri*r12hat[2];
 
     // torque i
     dUdni1[0] = dUdphi*dphi_dni1[0];
